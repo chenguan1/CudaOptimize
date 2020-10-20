@@ -33,11 +33,15 @@ __global__ void kernel_histgram_02(unsigned char* buffer, int size, unsigned int
     int tid = idx + idy * blockDim.x * gridDim.x * 8;
     if (tid >= size) return;
 
-    unsigned char v = 0;
-    for (int i = 0; i < 8; i++) {
-        v = buffer[tid + i];
-        atomicAdd(&histo[v], 1);
-    }
+    long long v = *(long long*)(&buffer[tid]);
+    atomicAdd(&histo[v & 0x00000000000000FF], 1);
+    atomicAdd(&histo[v & 0x000000000000FF00 >> 8], 1);
+    atomicAdd(&histo[v & 0x0000000000FF0000 >> 16], 1);
+    atomicAdd(&histo[v & 0x00000000FF000000 >> 24], 1);
+    atomicAdd(&histo[v & 0x000000FF00000000 >> 32], 1);
+    atomicAdd(&histo[v & 0x0000FF0000000000 >> 40], 1);
+    atomicAdd(&histo[v & 0x00FF000000000000 >> 48], 1);
+    atomicAdd(&histo[v & 0xFF00000000000000 >> 56], 1);
 }
 
 
@@ -88,13 +92,13 @@ int main()
 
     // 调用计算
     cout << "caculate with gpu:"<< endl;
-    const int threadCount = 256;
+    /*const int threadCount = 256;
     dim3 tn(threadCount);
     dim3 bn(length / threadCount + 1);
     cudaEventRecord(ev0);
     kernel_histgram_01 << <bn, tn >> >(d_hist_data, length, d_bin_data);
     cudaEventRecord(ev1);
-    cudaEventSynchronize(ev1);
+    cudaEventSynchronize(ev1);*/
 
     // 线程束优化，效果不佳
     /*const int threadCount = 256;
