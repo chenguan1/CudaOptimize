@@ -96,12 +96,13 @@ int main()
     h_hist_data = new unsigned char[length];
     memset(h_hist_data, 0x00, length);
 
+	memset(h_bin_data, 0x00, 256 * sizeof(int));
+
     cudaMalloc(&d_hist_data, length);
     cudaMalloc(&d_bin_data, 256 * sizeof(int));
     cudaMemset(d_bin_data, 0, 255 * sizeof(int));
 
     for (int i = 0; i < length; i++) {
-        //auto v = (unsigned char)(rand() % 250 + 2);
         auto v = (unsigned char)(i % 256);
         h_hist_data[i] = v;
     }
