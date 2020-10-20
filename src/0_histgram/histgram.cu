@@ -44,6 +44,32 @@ __global__ void kernel_histgram_02(unsigned char* buffer, int size, unsigned int
     atomicAdd(&histo[v & 0xFF00000000000000 >> 56], 1);
 }
 
+/*
+瓶颈在于atomicAdd，这个原子操作严重限制了并行的数量，
+可以用二级缓存或共享内存代替atomicAdd，进行局部汇总，
+在最终汇使用atomicAdd，降低atomicAdd的调用次数。
+*/
+__shared__ unsigned int d_bin_data_shared[256];
+__global__ void kernel_histgram_03(unsigned char* buffer, int size, unsigned int* histo)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int idy = blockIdx.y * blockDim.y + threadIdx.y;
+
+    int tid = idx + idy * blockDim.x * gridDim.x * 8;
+    if (tid >= size) return;
+
+    int tidInBlock = threadIdx.y * blockDim.x + threadIdx.x;
+    if (tidInBlock < 256) {
+        d_bin_data_shared[tidInBlock] = 0;
+    }
+    __syncthreads();
+
+    unsigned char v = buffer[tid];
+    ++d_bin_data_shared[v];
+    __syncthreads();
+
+    atomicAdd(&histo[tidInBlock], d_bin_data_shared[tidInBlock]);
+}
 
 void histgram_cpu(unsigned char* buffer, int size, unsigned int* histo)
 {
@@ -68,14 +94,15 @@ int main()
     cout << "preparing data:" << endl;
     int length = 1E+8;
     h_hist_data = new unsigned char[length];
+    memset(h_hist_data, 0x00, length);
 
     cudaMalloc(&d_hist_data, length);
     cudaMalloc(&d_bin_data, 256 * sizeof(int));
     cudaMemset(d_bin_data, 0, 255 * sizeof(int));
 
     for (int i = 0; i < length; i++) {
-        //h_hist_data[i] = static_cast<unsigned char>(rand() % 250 + 2);
-        auto v = (unsigned char)(rand() % 250 + 2);
+        //auto v = (unsigned char)(rand() % 250 + 2);
+        auto v = (unsigned char)(i % 256);
         h_hist_data[i] = v;
     }
     cudaMemcpy(d_hist_data, h_hist_data, length, cudaMemcpyHostToDevice);
@@ -109,12 +136,20 @@ int main()
     cudaEventRecord(ev1);
     cudaEventSynchronize(ev1);*/
 
+    const int threadCount = 512;
+    dim3 tn(threadCount);
+    dim3 bn(length / threadCount + 1);
+    cudaEventRecord(ev0);
+    kernel_histgram_03 << <bn, tn >> >(d_hist_data, length, d_bin_data);
+    cudaEventRecord(ev1);
+    cudaEventSynchronize(ev1);
+
     // 分析
-    /*cout << "============analysis===========" << endl;
+    cout << "============analysis===========" << endl;
     cudaMemcpy(h_bin_data, d_bin_data, 256 * sizeof(int), cudaMemcpyDeviceToHost);
     for (int i = 0; i < 256; i++) {
         cout << i << " : " <<h_bin_data[i] << endl;
-    }*/
+    }
 
 
     // 计时阶段
