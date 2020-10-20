@@ -20,6 +20,27 @@ __global__ void kernel_histgram_01(unsigned char* buffer, int size, unsigned int
     atomicAdd(&histo[v], 1);
 }
 
+/*
+一个线程束是32线程
+每半个线程束的读操作合并到了一次，单次传输最小32字节，最多128个字节
+128 / 16 = 8，每个线程处理8个字节效率最佳
+*/
+__global__ void kernel_histgram_02(unsigned char* buffer, int size, unsigned int* histo)
+{
+    int idx = blockIdx.x * blockDim.x + threadIdx.x;
+    int idy = blockIdx.y * blockDim.y + threadIdx.y;
+
+    int tid = idx + idy * blockDim.x * gridDim.x * 8;
+    if (tid >= size) return;
+
+    unsigned char v = 0;
+    for (int i = 0; i < 8; i++) {
+        v = buffer[tid + i];
+        atomicAdd(&histo[v], 1);
+    }
+}
+
+
 void histgram_cpu(unsigned char* buffer, int size, unsigned int* histo)
 {
     clock_t st = clock();
@@ -42,16 +63,16 @@ int main()
     // 准备数据
     cout << "preparing data:" << endl;
     int length = 1E+8;
-    //h_hist_data = new unsigned char[length];
-
-    assert(cudaSuccess == cudaMallocHost(&h_hist_data, length));
+    h_hist_data = new unsigned char[length];
 
     cudaMalloc(&d_hist_data, length);
     cudaMalloc(&d_bin_data, 256 * sizeof(int));
     cudaMemset(d_bin_data, 0, 255 * sizeof(int));
 
     for (int i = 0; i < length; i++) {
-        h_hist_data[i] = static_cast<unsigned char>(rand() % 250 + 2);
+        //h_hist_data[i] = static_cast<unsigned char>(rand() % 250 + 2);
+        auto v = (unsigned char)(rand() % 250 + 2);
+        h_hist_data[i] = v;
     }
     cudaMemcpy(d_hist_data, h_hist_data, length, cudaMemcpyHostToDevice);
     cout << "  ok" << endl;
@@ -74,6 +95,15 @@ int main()
     kernel_histgram_01 << <bn, tn >> >(d_hist_data, length, d_bin_data);
     cudaEventRecord(ev1);
     cudaEventSynchronize(ev1);
+
+    // 线程束优化，效果不佳
+    /*const int threadCount = 256;
+    dim3 tn(threadCount);
+    dim3 bn(length / 8 / threadCount + 1);
+    cudaEventRecord(ev0);
+    kernel_histgram_02 << <bn, tn >> >(d_hist_data, length, d_bin_data);
+    cudaEventRecord(ev1);
+    cudaEventSynchronize(ev1);*/
 
     // 分析
     /*cout << "============analysis===========" << endl;
